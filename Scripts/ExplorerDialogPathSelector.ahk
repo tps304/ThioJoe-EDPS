@@ -200,6 +200,8 @@ class ExplorerDialogPathSelector {
         alwaysShowClipboardmenuItem := true
         ; Whether to enable UI access by default to allow the script to run in elevated windows without running as admin
         enableUIAccess := true
+        ; Whether to enable Search in Everything Button
+        showEverythingButton := true
         ; Group paths by Window or not
         groupPathsByWindow := true
         ; Whether to show option to open current dialog path in an explorer Window
@@ -1405,6 +1407,22 @@ class ExplorerDialogPathSelector {
 
             hasItems := true
         }
+        
+        ; SEARCH IN EVERYTHING BUTTON
+        if (this.g_pth_Settings.HasOwnProp("showEverythingButton") ? this.g_pth_Settings.showEverythingButton : true) {
+            if (hasItems)
+                InsertMenuItem(CurrentLocations, "", unset, unset, unset, unset) ; Separator
+
+            ; Set menu text and add it with the custom callback
+            menuTextEverything := this.g_pth_Settings.standardEntryPrefix "Search in &Everything"
+            CurrentLocations.Add(menuTextEverything, LaunchEverything)
+            currentMenuNum++ 
+            
+            ; Give it a native Windows magnifying glass icon
+            CurrentLocations.SetIcon(currentMenuNum "&", A_WinDir . "\system32\shell32.dll", "23")
+            
+            hasItems := true
+        }
 
         ; If Debug Mode is enabled, show a menu item with the dialog's parent window title and other info
         if (debugMode) {
@@ -1947,6 +1965,10 @@ class ExplorerDialogPathSelector {
         labelClipboardCheckTooltipText := "If Disabled: The option to paste the clipboard path will only appear when a valid path is found on the clipboard.`nIf Enabled: The menu entry will always appear, but is disabled when no valid path is found."
         ExplorerDialogPathSelector.AddTooltipToControl(hTT, clipboardCheck.Hwnd, labelClipboardCheckTooltipText)
 
+        ; Show Search in Everything - Checkbox
+        everythingCheck := settingsGui.AddCheckbox("xm y+5", "Show 'Search in Everything' in menu")
+        everythingCheck.Value := this.g_pth_Settings.showEverythingButton
+
         ; Group Paths By Window - Checkbox
         groupByWindowCheck := settingsGui.AddCheckbox("xm y+5", "Group Explorer Paths By Window")
         groupByWindowCheck.Value := this.g_pth_Settings.groupPathsByWindow
@@ -2074,6 +2096,7 @@ class ExplorerDialogPathSelector {
             this.g_pth_Settings.standardEntryPrefix := standardPrefixEdit.Value
             this.g_pth_Settings.enableExplorerDialogMenuDebug := debugCheck.Value
             this.g_pth_Settings.alwaysShowClipboardmenuItem := clipboardCheck.Value
+            this.g_pth_Settings.showEverythingButton := everythingCheck.Value
             this.g_pth_Settings.groupPathsByWindow := groupByWindowCheck.Value
             this.g_pth_Settings.enableUIAccess := UIAccessCheck.Value
             ; Favorites paths are updated in the favorites GUI
@@ -3288,6 +3311,279 @@ class ExplorerDialogPathSelector {
         }
     }
 
-} ; ----------------------- END OF ExplorerDialogPathSelector -----------------------
+}
+
+; =====================================================================
+; LAUNCH EVERYTHING FROM MENU (Fixed Size: 550x400)
+; =====================================================================
+LaunchEverything(ItemName, ItemPos, MyMenu) {
+    local exeName := ""
+    try {
+        Run("Everything64.exe") 
+        exeName := "Everything64.exe"
+    } catch {
+        try {
+            Run("C:\Program Files\Everything 1.5a\Everything64.exe")
+            exeName := "Everything64.exe"
+        } catch {
+            try {
+                Run("C:\Program Files\Everything\Everything.exe")
+                exeName := "Everything.exe"
+            } catch {
+                ToolTip("Could not find Everything.exe!")
+                SetTimer(() => ToolTip(), -3000)
+                return
+            }
+        }
+    }
+
+    ; Wait up to 2 seconds for the Everything window to appear
+    if WinWait("ahk_exe " exeName,, 2) {
+        Sleep(50) ; Give it a fraction of a second to render
+        ; Resize the window to exactly Width: 550, Height: 400
+        WinMove(,, 550, 400, "ahk_exe " exeName)
+    }
+}
+
+#HotIf  ; End of HotIf block started at top of file
+;@region Everything Bridge
+; =====================================================================
+; EVERYTHING -> FILE DIALOG BRIDGE (ADVANCED)
+;Enter/double-click only while a  real Open/Save dialog exists
+; =====================================================================
+
+global SearchCtl := "Edit1"
+global ListCtl   := "SysListView321"
+
+; ---------------------------------------------------------------------
+; Context helpers
+; ---------------------------------------------------------------------
+
+; True when Everything's main window is active (not its Options/other dialogs)
+IsEverythingMain()
+{
+    return WinActive("ahk_exe Everything64.exe") || WinActive("ahk_exe Everything.exe")
+        ? !WinActive("ahk_class #32770") : false
+}
+
+; Returns the HWND of a genuine file dialog (not owned by Everything), or 0
+FindFileDialog()
+{
+    for hwnd in WinGetList("ahk_class #32770")
+    {
+        try
+        {
+            if RegExMatch(WinGetProcessName("ahk_id " hwnd), "i)^Everything(64)?\.exe$")
+                continue
+            ControlGetHwnd("Edit1", "ahk_id " hwnd)
+            return hwnd
+        }
+    }
+    return 0
+}
+
+; True when keyboard focus is in the search box or the result list
+FocusIsSearchOrList()
+{
+    try
+    {
+        c := ControlGetClassNN(ControlGetFocus("A"))
+        return (c = SearchCtl || c = ListCtl)
+    }
+    catch
+        return false
+}
+
+MouseIsOverEverythingList()
+{
+    try
+    {
+        MouseGetPos(,,, &classNN)
+        return (classNN == ListCtl)
+    }
+    catch
+        return false
+}
+
+; ---------------------------------------------------------------------
+; 1. F4: works anytime Everything is active
+; ---------------------------------------------------------------------
+;#HotIf IsEverythingMain()
+;F4::ExecuteEverythingBridge()
+
+; ---------------------------------------------------------------------
+; 2. Enter: only when a real file dialog is open and focus is in the
+;    search box or list (so rename, Options, etc. are untouched)
+; ---------------------------------------------------------------------
+#HotIf IsEverythingMain() && FocusIsSearchOrList() && FindFileDialog()
+Enter::
+NumpadEnter::ExecuteEverythingBridge()
+
+; ---------------------------------------------------------------------
+; 3. Double-click: only when a real file dialog is open and the mouse
+;    is over the result list
+; ---------------------------------------------------------------------
+#MaxThreadsPerHotkey 2
+#HotIf IsEverythingMain() && FindFileDialog() && MouseIsOverEverythingList()
+*$LButton::
+{
+    static lastTick := 0, lastX := 0, lastY := 0
+
+    MouseGetPos(&x, &y)
+    halfW := DllCall("GetSystemMetrics", "Int", 36) // 2   ; SM_CXDOUBLECLK
+    halfH := DllCall("GetSystemMetrics", "Int", 37) // 2   ; SM_CYDOUBLECLK
+
+    ; Second click of a genuine double-click: same spot, within the system time
+    if (lastTick
+        && A_TickCount - lastTick < DllCall("GetDoubleClickTime")
+        && Abs(x - lastX) <= halfW && Abs(y - lastY) <= halfH)
+    {
+        lastTick := 0          ; a third click starts a fresh sequence
+        ExecuteEverythingBridge()
+        return
+    }
+
+    lastTick := A_TickCount, lastX := x, lastY := y
+
+    ; Single click: pass through transparently (keeps dragging, Shift-click, etc.)
+    Send("{Blind}{LButton Down}")
+    KeyWait("LButton")
+    Send("{Blind}{LButton Up}")
+}
+#MaxThreadsPerHotkey 1
+#HotIf
+
+; ---------------------------------------------------------------------
+; 5. REVERT / CANCEL: Escape ALWAYS closes Everything and reopens the menu
+; ---------------------------------------------------------------------
+#HotIf IsEverythingMain() && FindFileDialog()
+Esc::
+{
+    dlg := FindFileDialog()
+    
+    ; 1. Instantly close Everything regardless of typed text or selected files
+    WinClose("A") 
+    
+    if (dlg)
+    {
+        ; 2. Reactivate the underlying file dialog
+        WinActivate("ahk_id " dlg)
+        
+        ; 3. Wait a fraction of a second to ensure the dialog is fully in focus
+        if WinWaitActive("ahk_id " dlg,, 1)
+        {
+            ; Trigger the Path Selector menu using the global class instance
+            if IsSet(EDPS)
+                EDPS.DisplayDialogPathMenu("Revert")
+        }
+    }
+}
+#HotIf
+
+; =====================================================================
+; MAIN BRIDGE LOGIC
+; =====================================================================
+ExecuteEverythingBridge()
+{
+    savedClip := ClipboardAll()
+
+    ; 1. Try the current selection
+    raw := CopyFromEverything()
+
+    ; 2. Nothing selected -> first result, unless the search is empty
+    if (raw = "")
+    {
+        if (SearchIsEmpty())
+        {
+            A_Clipboard := savedClip
+            Notify("Search box is empty - nothing selected")
+            return
+        }
+        SelectFirstResult()
+        raw := CopyFromEverything()
+    }
+
+    A_Clipboard := savedClip
+    savedClip := ""
+
+    if (raw = "")
+    {
+        Notify("No result found in Everything")
+        return
+    }
+
+    ; 3. First line only (in case several items are selected)
+    lines := StrSplit(Trim(raw, "`r`n "), "`n", "`r")
+    fullPath := Trim(lines[1], '" ')
+
+    ; 4. Locate the file dialog
+    dlg := FindFileDialog()
+    if !dlg
+    {
+        Notify("No Open/Save dialog found!")
+        return
+    }
+
+    ; 5. Activate it, insert the path, confirm
+    WinActivate("ahk_id " dlg)
+    if !WinWaitActive("ahk_id " dlg,, 1)
+    {
+        Notify("Could not activate the dialog")
+        return
+    }
+
+    ; -------------------------------------------------------------
+    ; SMART INJECTION: Route Folders to EDPS, Route Files to Edit1
+    ; -------------------------------------------------------------
+    if InStr(FileExist(fullPath), "D") 
+    {
+        ; It is a Folder. Use the EDPS Navigation Engine to safely enter it.
+        if IsSet(EDPS) {
+            windowClass := WinGetClass("ahk_id " dlg)
+            EDPS.Navigate("EverythingBridge", 0, 0, fullPath, windowClass, dlg)
+        }
+    } 
+    else 
+    {
+        ; It is a File. Inject into Edit1 to select it / save it.
+        ControlSetText(fullPath, "Edit1", "ahk_id " dlg)
+        Sleep(50)
+        ControlSend("{Enter}", "Edit1", "ahk_id " dlg)
+    }
+}
+
+; --- Utility functions ---
+SelectFirstResult()
+{
+    try
+        ControlFocus(ListCtl, "A")
+    catch
+        Send("{Tab}")
+    Sleep(100)
+    Send("{Home}")
+    Sleep(100)
+}
+
+SearchIsEmpty()
+{
+    try
+        return Trim(ControlGetText(SearchCtl, "A")) = ""
+    catch
+        return false
+}
+
+CopyFromEverything()
+{
+    A_Clipboard := ""
+    Send("^+c")
+    return ClipWait(0.7) ? A_Clipboard : ""
+}
+
+Notify(msg)
+{
+    ToolTip(msg)
+    SetTimer(() => ToolTip(), -2000)
+}
+; ----------------------- END OF ExplorerDialogPathSelector -----------------------
 
 #HotIf  ; End of HotIf block started at top of file
