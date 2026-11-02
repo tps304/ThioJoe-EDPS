@@ -3408,7 +3408,7 @@ MouseIsOverEverythingList()
 ; ---------------------------------------------------------------------
 ; 1. F4: works anytime Everything is active
 ; ---------------------------------------------------------------------
-#HotIf IsEverythingMain()
+;#HotIf IsEverythingMain()
 ;F4::ExecuteEverythingBridge()
 
 ; ---------------------------------------------------------------------
