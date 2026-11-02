@@ -3408,7 +3408,7 @@ MouseIsOverEverythingList()
 ; ---------------------------------------------------------------------
 ; 1. F4: works anytime Everything is active
 ; ---------------------------------------------------------------------
-;#HotIf IsEverythingMain()
+#HotIf IsEverythingMain()
 ;F4::ExecuteEverythingBridge()
 
 ; ---------------------------------------------------------------------
@@ -3418,7 +3418,7 @@ MouseIsOverEverythingList()
 #HotIf IsEverythingMain() && FocusIsSearchOrList() && FindFileDialog()
 Enter::
 NumpadEnter::ExecuteEverythingBridge()
-
+#HotIf
 ; ---------------------------------------------------------------------
 ; 3. Double-click: only when a real file dialog is open and the mouse
 ;    is over the result list
@@ -3454,7 +3454,7 @@ NumpadEnter::ExecuteEverythingBridge()
 #HotIf
 
 ; ---------------------------------------------------------------------
-; 5. REVERT / CANCEL: Escape ALWAYS closes Everything and reopens the menu
+; 4. REVERT / CANCEL: Escape ALWAYS closes Everything and reopens the menu
 ; ---------------------------------------------------------------------
 #HotIf IsEverythingMain() && FindFileDialog()
 Esc::
@@ -3585,5 +3585,3 @@ Notify(msg)
     SetTimer(() => ToolTip(), -2000)
 }
 ; ----------------------- END OF ExplorerDialogPathSelector -----------------------
-
-#HotIf  ; End of HotIf block started at top of file
