@@ -14,8 +14,5 @@ Download the Installer
 2.  For the latest release, look under `Assets` and download the `.msi` installer and run it.
 
 
-## 📜 Snipping Tool Controller
-### A helper script for the built-in Windows Snipping Tool that adds convenience features, such as automatically opening the editor after taking a snip, and launching directly to different modes.
-
 ## 📜 Utils Script
 ### A library of various utility functions that are shared and used by the other scripts in this collection. This is not a standalone script.
